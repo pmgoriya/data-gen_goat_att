@@ -2,6 +2,7 @@ import psycopg2
 import random
 import string
 import datetime
+import time
 from dateutil.relativedelta import relativedelta
 
 # Connect to the PostgreSQL database
@@ -14,15 +15,15 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # Function to generate random data for goats_vital table
-def generate_goats_vital_data():
+def generate_goats_vital_data(tag_ids, hub_ids):
     created_at = f"{int(datetime.datetime.now().timestamp() * 1000000000)}"
     ambient_temperature = random.randint(20, 40)
     battery = random.randint(70, 100)
     temperature = round(random.uniform(20, 40), 2)
     humidity = round(random.uniform(30, 60), 2)
     rssi = random.randint(-100, -50)
-    hub_id = ''.join(random.choices(string.ascii_letters + string.digits, k=17))
-    tag_id = ''.join(random.choices(string.ascii_letters + string.digits, k=17))
+    hub_id = random.choice(list(hub_ids))
+    tag_id = random.choice(list(tag_ids))
     return (created_at, ambient_temperature, battery, temperature, humidity, rssi, hub_id, tag_id)
 
 # Function to generate random data for tag_details table
@@ -50,15 +51,6 @@ def generate_hub_goat_tag_junction_data(hub_id, tag_id):
     farmer_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     goat_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     return (farmer_id, hub_id, tag_id, goat_id)
-
-# Insert data into goats_vital table
-for _ in range(10):
-    data = generate_goats_vital_data()
-    query = """
-        INSERT INTO goats_vital (created_at, ambient_temperature, battery, temperature, humidity, rssi, hub_id, tag_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """
-    cur.execute(query, data)
 
 # Insert data into tag_details table
 tag_ids = set()
@@ -94,6 +86,34 @@ for hub_id in hub_ids:
         query = "INSERT INTO hub_goat_tag_junction (farmer_id, hub_id, tag_id, goat_id) VALUES (%s, %s, %s, %s)"
         cur.execute(query, data)
 
+# Commit the transaction
 conn.commit()
-cur.close()
-conn.close()
+
+# Get existing tag_ids and hub_ids
+cur.execute("SELECT tag_id FROM tag_details")
+existing_tag_ids = set([row[0] for row in cur.fetchall()])
+
+cur.execute("SELECT hub_id FROM hub_details")
+existing_hub_ids = set([row[0] for row in cur.fetchall()])
+
+while True:
+    try:
+        # Insert data into goats_vital table
+        for _ in range(10):
+            data = generate_goats_vital_data(existing_tag_ids, existing_hub_ids)
+            query = """
+                INSERT INTO goats_vital (created_at, ambient_temperature, battery, temperature, humidity, rssi, hub_id, tag_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            cur.execute(query, data)
+
+        # Commit the transaction
+        conn.commit()
+
+        # Wait for a minute before the next iteration
+        time.sleep(60)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        conn.rollback()
+        time.sleep(60)
